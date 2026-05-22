@@ -23,7 +23,7 @@ Le dataset [Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce) 
 
 ---
 
-## 🏗️ Architecture du projet
+## Architecture du projet
 
 Le projet repose sur une architecture BI simple et reproductible, permettant de transformer des fichiers CSV bruts en tables analytiques exploitables dans Apache Superset.
 
