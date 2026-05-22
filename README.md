@@ -61,15 +61,6 @@ PostgreSQL — schéma "analytics"
     │  → 37 colonnes
     │  → table principale pour l’analyse des commandes
     │
-    │  build_product_features.py
-    │  → création de variables produit
-    │  → analyse par catégorie
-    │  → indicateurs de prix et de performance produit
-    │
-    │  train_models.py
-    │  → entraînement de modèles statistiques
-    │  → analyse de la satisfaction client
-    │  → analyse des retards de livraison
     ▼
 Apache Superset
     │
