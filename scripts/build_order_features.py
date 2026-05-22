@@ -9,6 +9,7 @@ load_dotenv()
 
 
 def get_database_url() -> str:
+    """Récupère l'URL de connexion PostgreSQL depuis les variables d'environnement."""
     database_url = os.getenv("DATABASE_URL")
     if not database_url:
         raise ValueError("DATABASE_URL est manquante dans le .env")
@@ -38,11 +39,24 @@ def haversine(lat1, lon1, lat2, lon2):
 
 
 def main():
+    """
+    Construit la table analytique `analytics.fact_orders` à partir des données brutes.
+
+    Étapes :
+    1. Chargement des tables brutes depuis le schéma 'raw'
+    2. Conversion des colonnes de dates
+    3. Agrégation des items, paiements et avis par commande
+    4. Jointure géographique client/vendeur pour calculer la distance
+    5. Calcul des features temporelles et indicateurs de retard
+    6. Écriture de la table finale dans le schéma 'analytics'
+    """
     engine = create_engine(get_database_url())
 
+    # Crée le schéma analytics s'il n'existe pas
     with engine.begin() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS analytics;"))
 
+    # Chargement des tables brutes depuis PostgreSQL
     orders = pd.read_sql("SELECT * FROM raw.orders", engine)
     customers = pd.read_sql("SELECT * FROM raw.customers", engine)
     order_items = pd.read_sql("SELECT * FROM raw.order_items", engine)
@@ -51,6 +65,7 @@ def main():
     sellers = pd.read_sql("SELECT * FROM raw.sellers", engine)
     geolocation = pd.read_sql("SELECT * FROM raw.geolocation", engine)
 
+    # Conversion des colonnes de dates de la table orders en datetime
     date_cols = [
         "order_purchase_timestamp",
         "order_approved_at",
@@ -62,6 +77,7 @@ def main():
         if col in orders.columns:
             orders[col] = pd.to_datetime(orders[col], errors="coerce")
 
+    # Conversion des dates d'avis clients
     if "review_creation_date" in order_reviews.columns:
         order_reviews["review_creation_date"] = pd.to_datetime(
             order_reviews["review_creation_date"], errors="coerce"
@@ -72,6 +88,7 @@ def main():
             order_reviews["review_answer_timestamp"], errors="coerce"
         )
 
+    # Agrégation des articles par commande : nombre d'items, vendeurs, prix et frais de port
     items_agg = (
         order_items.groupby("order_id")
         .agg(
@@ -83,6 +100,7 @@ def main():
         .reset_index()
     )
 
+    # Agrégation des paiements : montant total et nombre maximum de mensualités
     payments_agg = (
         order_payments.groupby("order_id")
         .agg(
@@ -92,6 +110,7 @@ def main():
         .reset_index()
     )
 
+    # Agrégation des avis : on garde le premier score par commande
     reviews_agg = (
         order_reviews.groupby("order_id")
         .agg(
@@ -107,7 +126,7 @@ def main():
         .agg(first_seller_id=("seller_id", "first"))
     )
 
-    # Géolocalisation moyenne par zip code prefix
+    # Géolocalisation moyenne par zip code prefix (plusieurs points par code possible)
     geo_avg = (
         geolocation.groupby("geolocation_zip_code_prefix", as_index=False)
         .agg(
@@ -116,7 +135,7 @@ def main():
         )
     )
 
-    # Géolocalisation client
+    # Coordonnées géographiques des clients
     customer_geo = geo_avg.rename(
         columns={
             "geolocation_zip_code_prefix": "customer_zip_code_prefix",
@@ -125,7 +144,7 @@ def main():
         }
     )
 
-    # Géolocalisation vendeur
+    # Coordonnées géographiques des vendeurs (jointure avec la table sellers)
     seller_geo = sellers.merge(
         geo_avg,
         left_on="seller_zip_code_prefix",
@@ -146,6 +165,7 @@ def main():
         ]
     ]
 
+    # Construction de la table de faits par jointures successives
     fact_orders = (
         orders.merge(customers, on="customer_id", how="left")
         .merge(items_agg, on="order_id", how="left")
@@ -156,22 +176,27 @@ def main():
         .merge(seller_geo, left_on="first_seller_id", right_on="seller_id", how="left")
     )
 
+    # Durée réelle de livraison en jours (date livraison - date achat)
     fact_orders["delivery_time_days"] = (
         fact_orders["order_delivered_customer_date"] - fact_orders["order_purchase_timestamp"]
     ).dt.days
 
+    # Durée estimée de livraison en jours (date estimée - date achat)
     fact_orders["estimated_delivery_time_days"] = (
         fact_orders["order_estimated_delivery_date"] - fact_orders["order_purchase_timestamp"]
     ).dt.days
 
+    # Retard en jours : positif = livré en retard, négatif = livré en avance
     fact_orders["delay_days"] = (
         fact_orders["order_delivered_customer_date"] - fact_orders["order_estimated_delivery_date"]
     ).dt.days
 
+    # Indicateurs booléens (0/1)
     fact_orders["is_late"] = fact_orders["delay_days"].fillna(0).gt(0).astype(int)
     fact_orders["has_review"] = fact_orders["review_score"].notna().astype(int)
     fact_orders["has_delivery_date"] = fact_orders["order_delivered_customer_date"].notna().astype(int)
 
+    # Distance en km entre le client et le vendeur via la formule haversine
     fact_orders["distance_km"] = haversine(
         fact_orders["customer_lat"],
         fact_orders["customer_lon"],
@@ -184,6 +209,7 @@ def main():
     fact_orders["purchase_month"] = fact_orders["order_purchase_timestamp"].dt.month
     fact_orders["purchase_year_month"] = fact_orders["order_purchase_timestamp"].dt.to_period("M").astype(str)
 
+    # Écriture de la table finale dans le schéma analytics
     fact_orders.to_sql(
         "fact_orders",
         engine,
