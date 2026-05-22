@@ -194,7 +194,7 @@ def main():
         chunksize=5000,
     )
 
-    print("✅ Table créée : analytics.fact_orders")
+    print("Table créée : analytics.fact_orders")
     print(f"Nombre de lignes : {len(fact_orders):,}".replace(",", " "))
     print("Colonnes :")
     for col in fact_orders.columns:

@@ -75,7 +75,7 @@ def load_one_csv(engine, csv_path: Path, table_name: str, schema_name: str = "ra
         method="multi",
         chunksize=5000,
     )
-    print(f"  ✅ Chargé dans {schema_name}.{table_name}")
+    print(f"Chargé dans {schema_name}.{table_name}")
 
 
 def main() -> None:
@@ -94,7 +94,7 @@ def main() -> None:
         csv_path = RAW_DIR / filename
 
         if not csv_path.exists():
-            print(f"⚠️ Fichier absent : {filename}")
+            print(f"Fichier absent : {filename}")
             continue
 
         load_one_csv(engine, csv_path, table_name, schema_name="raw")
